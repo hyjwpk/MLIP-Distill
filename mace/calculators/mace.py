@@ -340,12 +340,6 @@ class MACECalculator(Calculator):
         batch_base = self._atoms_to_batch(atoms)
 
         if self.model_type in ["MACE", "EnergyDipoleMACE"]:
-            batch = self._clone_batch(batch_base)
-            node_heads = batch["head"][batch["batch"]]
-            num_atoms_arange = torch.arange(batch["positions"].shape[0])
-            node_e0 = self.models[0].atomic_energies_fn(batch["node_attrs"])[
-                num_atoms_arange, node_heads
-            ]
             compute_stress = not self.use_compile
         else:
             compute_stress = False
@@ -364,7 +358,7 @@ class MACECalculator(Calculator):
             )
             if self.model_type in ["MACE", "EnergyDipoleMACE"]:
                 ret_tensors["energies"][i] = out["energy"].detach()
-                ret_tensors["node_energy"][i] = (out["node_energy"] - node_e0).detach()
+                ret_tensors["node_energy"][i] = out["node_energy"].detach()
                 ret_tensors["forces"][i] = out["forces"].detach()
                 if out["stress"] is not None:
                     ret_tensors["stress"][i] = out["stress"].detach()

@@ -455,14 +455,7 @@ def test_calculator_node_energy(fitting_configs, trained_model):
     for at in fitting_configs:
         trained_model.calculate(at)
         node_energies = trained_model.results["node_energy"]
-        batch = trained_model._atoms_to_batch(at)  # pylint: disable=protected-access
-        node_heads = batch["head"][batch["batch"]]
-        num_atoms_arange = torch.arange(batch["positions"].shape[0])
-        node_e0 = (
-            trained_model.models[0].atomic_energies_fn(batch["node_attrs"]).detach()
-        )
-        node_e0 = node_e0[num_atoms_arange, node_heads].cpu().numpy()
-        energy_via_nodes = np.sum(node_energies + node_e0)
+        energy_via_nodes = np.sum(node_energies)
         energy = trained_model.results["energy"]
         np.testing.assert_allclose(energy, energy_via_nodes, atol=1e-6)
 
