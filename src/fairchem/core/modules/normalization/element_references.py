@@ -78,6 +78,16 @@ class LinearReferences(nn.Module):
 
         return target.index_add(0, batch.batch, elemrefs, alpha=sign)
 
+    def apply_atomwise_refs(
+        self, target: torch.Tensor, batch: Batch, sign: int
+    ) -> torch.Tensor:
+        """Apply element reference energies per atom."""
+        indices = batch.atomic_numbers.to(
+            dtype=torch.int, device=self.element_references.device
+        )
+        elemrefs = self.element_references[indices].to(dtype=target.dtype)
+        return target + sign * elemrefs.unsqueeze(-1)
+
     @torch.autocast(device_type="cuda", enabled=False)
     def dereference(
         self, target: torch.Tensor, batch: Batch, reshaped: bool = True

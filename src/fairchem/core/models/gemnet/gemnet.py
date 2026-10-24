@@ -545,6 +545,7 @@ class GemNetT(nn.Module, GraphModelMixin):
             E_t += E
 
         nMolecules = torch.max(batch) + 1
+        outputs = {"node_energy": E_t}
         if self.extensive:
             E_t = scatter(
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="add"
@@ -554,7 +555,7 @@ class GemNetT(nn.Module, GraphModelMixin):
                 E_t, batch, dim=0, dim_size=nMolecules, reduce="mean"
             )  # (nMolecules, 1)
 
-        outputs = {"energy": E_t}
+        outputs["energy"] = E_t
 
         if self.regress_forces:
             if self.direct_forces:

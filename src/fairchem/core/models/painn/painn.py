@@ -399,6 +399,7 @@ class PaiNN(nn.Module, GraphModelMixin):
         per_atom_energy = self.out_energy(x).squeeze(1)
         energy = scatter(per_atom_energy, batch, dim=0)
         outputs = {"energy": energy}
+        outputs["node_energy"] = per_atom_energy
 
         if self.regress_forces:
             if self.direct_forces:

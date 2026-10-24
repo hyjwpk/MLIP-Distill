@@ -404,6 +404,8 @@ class MLP_EFS_Head(nn.Module, HeadInterface):
         backbone.force_block = None
         self.regress_stress = backbone.regress_stress
         self.regress_forces = backbone.regress_forces
+        # Enable higher coordinate derivatives during label generation in eval mode.
+        self.force_create_graph = False
 
         self.sphere_channels = backbone.sphere_channels
         self.hidden_channels = backbone.hidden_channels
@@ -434,12 +436,13 @@ class MLP_EFS_Head(nn.Module, HeadInterface):
         )
         energy.index_add_(0, data["batch"], node_energy.view(-1))
         outputs[energy_key] = energy
+        outputs["node_energy"] = node_energy.view(-1, 1)
 
         if self.regress_stress:
             grads = torch.autograd.grad(
                 [energy.sum()],
                 [data["pos"], emb["displacement"]],
-                create_graph=self.training,
+                create_graph=self.training or self.force_create_graph,
             )
             forces = torch.neg(grads[0])
             virial = grads[1].view(-1, 3, 3)
@@ -453,7 +456,9 @@ class MLP_EFS_Head(nn.Module, HeadInterface):
             forces = (
                 -1
                 * torch.autograd.grad(
-                    energy.sum(), data["pos"], create_graph=self.training
+                    energy.sum(),
+                    data["pos"],
+                    create_graph=self.training or self.force_create_graph,
                 )[0]
             )
             outputs[forces_key] = forces

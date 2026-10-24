@@ -393,6 +393,8 @@ class OCPTrainer(BaseTrainer):
 
         targets = {}
         for target_name in self.output_targets:
+            if target_name not in batch:
+                continue
             target = batch[target_name]
             num_atoms_in_batch = batch.natoms.sum()
 
