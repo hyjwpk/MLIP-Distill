@@ -1,0 +1,58 @@
+includes:
+- experiments/runs/configs/MPtrj/yttrium/painn.yml
+seed: 0
+logger:
+  name: tensorboard
+  project: MPtrj
+dataset:
+  train:
+    teacher_labels_folder: experiments/resources/data/MPtrj/yttrium/labels/MACE-MP
+model:
+  direct_forces: true
+optim:
+  max_epochs: 1000
+  hessian_sample_size: 4
+  vectorize_jacs: true
+  batch_size: 16
+  eval_batch_size: 32
+  load_balancing: atoms
+  num_workers: 8
+  optimizer: AdamW
+  optimizer_params:
+    eps: 1.0e-07
+    weight_decay: 2.0e-06
+    amsgrad: true
+  lr_initial: 0.001
+  scheduler: ReduceLROnPlateau
+  patience: 10
+  factor: 0.8
+  min_lr: 5.0e-06
+  ema_decay: 0.999
+  clip_grad_norm: 10
+trainer: src.distill_trainer.DistillTrainer
+loss_functions:
+- energy:
+    fn: mae
+    coefficient: 5
+- forces:
+    fn: l2mae
+    coefficient: 100
+- hessian:
+    fn: l2mae
+    coefficient: 200
+- node_energy:
+    fn: mae
+    coefficient: 10
+outputs:
+  node_energy:
+    level: atom
+    train_on_free_atoms: true
+    eval_on_free_atoms: true
+  energy:
+    shape: 1
+    level: system
+  forces:
+    irrep_dim: 1
+    level: atom
+    train_on_free_atoms: true
+    eval_on_free_atoms: true

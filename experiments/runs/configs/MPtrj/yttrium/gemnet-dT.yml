@@ -1,0 +1,31 @@
+includes:
+- experiments/runs/configs/MPtrj/yttrium/base.yml
+
+model:
+  name: gemnet_t
+  num_spherical: 7
+  num_radial: 6
+  num_blocks: 4
+  emb_size_rbf: 16
+  emb_size_cbf: 16
+  num_elements: 100
+  emb_size_bil_trip: 64
+  num_before_skip: 1
+  num_after_skip: 1
+  num_concat: 1
+  num_atom: 2
+  cutoff: 6.0
+  max_neighbors: 50
+  rbf:
+    name: gaussian
+  envelope:
+    name: polynomial
+    exponent: 5
+  cbf:
+    name: spherical_harmonics
+  output_init: HeOrthogonal
+  activation: silu
+  scale_file: experiments/runs/configs/scales/gemnet.json
+  extensive: true
+  otf_graph: true
+  regress_forces: true

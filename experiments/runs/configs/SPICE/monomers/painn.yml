@@ -1,0 +1,16 @@
+# Requires full precision (AMP disabled).
+includes:
+- experiments/runs/configs/SPICE/monomers/base.yml
+
+model:
+  name: painn
+  hidden_channels: 128
+  num_layers: 4
+  num_rbf: 128
+  cutoff: 12.0
+  max_neighbors: 50
+  scale_file: experiments/runs/configs/scales/painn.pt
+  regress_forces: true
+  use_pbc: true
+  otf_graph: true
+

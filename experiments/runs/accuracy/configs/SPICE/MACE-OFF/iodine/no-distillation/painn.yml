@@ -1,0 +1,44 @@
+includes:
+- experiments/runs/configs/SPICE/iodine/painn.yml
+seed: 0
+logger:
+  name: tensorboard
+  project: SPICE
+optim:
+  max_epochs: 1500
+  hessian_sample_size: 4
+  batch_size: 8
+  eval_batch_size: 32
+  load_balancing: atoms
+  num_workers: 4
+  optimizer: AdamW
+  optimizer_params:
+    eps: 1.0e-07
+    weight_decay: 2.0e-06
+    amsgrad: true
+  lr_initial: 0.001
+  scheduler: ReduceLROnPlateau
+  patience: 10
+  factor: 0.8
+  min_lr: 5.0e-06
+  ema_decay: 0.999
+  clip_grad_norm: 10
+trainer: ocp
+outputs:
+  energy:
+    shape: 1
+    level: system
+  forces:
+    irrep_dim: 1
+    level: atom
+    train_on_free_atoms: true
+    eval_on_free_atoms: true
+loss_functions:
+- energy:
+    fn: per_atom_mae
+    coefficient: 5
+- forces:
+    fn: l2mae
+    coefficient: 100
+model:
+  direct_forces: true

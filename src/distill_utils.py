@@ -1,0 +1,184 @@
+import torch 
+import logging
+from fairchem.core.common import distutils
+
+def print_cuda_memory_usage():
+    allocated = torch.cuda.memory_allocated() / (1024 ** 3)
+    reserved = torch.cuda.memory_reserved() / (1024 ** 3)
+    logging.info(f"CUDA memory allocated: {allocated:.2f} GB")
+    logging.info(f"CUDA memory reserved: {reserved:.2f} GB")
+    print(f"CUDA memory allocated: {allocated:.2f} GB")
+    print((f"CUDA memory reserved: {reserved:.2f} GB"))
+
+
+def get_teacher_jacobian(forces, batch, vectorize=True, should_mask=True):
+    natoms = batch.natoms
+    total_num_atoms = sum(batch.natoms)
+    cumulative_sums = [0] + torch.cumsum(natoms, 0).tolist()
+    mask = batch.fixed == 0
+    if not should_mask:
+        mask = torch.ones(total_num_atoms, dtype=torch.bool)
+    
+    mask_per_mol = [mask[cum_sum:cum_sum + nat] for cum_sum, nat in zip(cumulative_sums[:-1], natoms)]
+    num_free_atoms_per_mol = [sum(sub_mask) for sub_mask in mask_per_mol]
+    max_free_atom_per_mol = max(num_free_atoms_per_mol)
+    grad_outputs = torch.zeros((max_free_atom_per_mol, 3, total_num_atoms, 3)).to(forces.device)
+    for i, free_atoms_in_mol in enumerate(num_free_atoms_per_mol):
+        indices = torch.arange(free_atoms_in_mol)
+        offset_indices = torch.nonzero(mask_per_mol[i]).flatten() + cumulative_sums[i]
+        assert len(offset_indices) == free_atoms_in_mol
+        grad_outputs[indices, :, offset_indices, :] = torch.eye(3)[None, :, :].to(forces.device)
+    jac = get_jacobian(forces, batch.pos, grad_outputs, looped=(not vectorize)) # Shape: (max_free_atoms, 3, total_atoms, 3).
+
+    jacs_per_mol = [jac[:n_fr_at, :,  cum_sum:cum_sum + nat, :] for cum_sum, n_fr_at, nat in zip(cumulative_sums[:-1], num_free_atoms_per_mol, natoms)]
+
+    return jacs_per_mol
+
+
+def sample_with_mask(n, num_samples, mask):
+    if mask.shape[0] != n:
+        raise ValueError("Mask length must be equal to the number of rows in the grid (n)")
+    
+    valid_rows = torch.where(mask)[0]
+    if valid_rows.numel() == 0:
+        raise ValueError("No valid rows available according to the mask")
+
+    valid_indices = valid_rows.repeat_interleave(3) * 3 + torch.tensor([0, 1, 2]).repeat(valid_rows.size(0)).to(mask.device)
+
+    chosen_indices = valid_indices[torch.randperm(valid_indices.size(0))[:num_samples]]
+
+    row_indices = chosen_indices // 3
+    col_indices = chosen_indices % 3
+
+    samples = torch.stack((row_indices, col_indices), dim=1)
+    
+    return samples
+
+def get_jacobian(forces, pos, grad_outputs, create_graph=False, looped=False):
+    def compute_grad(grad_output):
+        return torch.autograd.grad(
+                outputs=forces,
+                inputs=pos,
+                grad_outputs=grad_output,
+                create_graph=create_graph,
+                retain_graph=True
+            )[0]
+    if not looped:
+        if len(grad_outputs.shape) == 4:
+            compute_jacobian = torch.vmap(torch.vmap(compute_grad))
+        else:
+            compute_jacobian = torch.vmap(compute_grad)
+        return compute_jacobian(grad_outputs)
+    else:
+        num_atoms = forces.shape[0]
+        if len(grad_outputs.shape) == 4:
+            full_jac = torch.zeros(grad_outputs.shape[0], 3, num_atoms, 3).to(forces.device)
+            for i in range(grad_outputs.shape[0]):
+                for j in range(3):
+                    full_jac[i, j] = compute_grad(grad_outputs[i, j])
+        else:
+            full_jac = torch.zeros(grad_outputs.shape[0], num_atoms, 3).to(forces.device)
+            for i in range(grad_outputs.shape[0]):
+                    full_jac[i] = compute_grad(grad_outputs[i])
+        return full_jac
+
+
+
+def get_hessian_loss(out, batch, num_samples, mask, should_mask, looped=False, finite_differences=False, forward=None, collater=None, force_scale=1.0):
+    forces = out['forces']
+    natoms = batch.natoms
+    total_num_atoms = forces.shape[0]
+    if not should_mask:
+        mask = torch.ones(total_num_atoms, dtype=torch.bool)
+    cumulative_sums = [0] + torch.cumsum(natoms, 0).tolist()
+    
+    by_molecule = []
+    grad_outputs = torch.zeros((num_samples, total_num_atoms, 3)).to(forces.device)
+    for i, atoms_in_mol in enumerate(batch.natoms):
+        submask = mask[cumulative_sums[i]:cumulative_sums[i+1]]
+        samples = sample_with_mask(atoms_in_mol, num_samples, submask)
+        
+        by_molecule.append(samples)
+        offset_samples = samples.clone()
+        offset_samples[:, 0] += cumulative_sums[i]
+        grad_outputs[torch.arange(samples.shape[0]), offset_samples[:, 0], offset_samples[:, 1]] = 1
+    if not finite_differences:
+        jac = get_jacobian(forces, batch.pos, grad_outputs, create_graph=True, looped=looped)
+    else:
+        jac = get_jacobian_finite_difference(
+            forces=forces, 
+            batch= batch, 
+            grad_outputs=grad_outputs, 
+            collater=collater,  
+            forward= forward, 
+            looped=looped)
+    mask_per_mol = [mask[cum_sum:cum_sum + nat] for cum_sum, nat in zip(cumulative_sums[:-1], natoms)]
+    num_free_atoms_per_mol = torch.tensor([sum(sub_mask) for sub_mask in mask_per_mol], device=natoms.device)
+    cum_jac_indexes = [0] +  torch.cumsum((num_free_atoms_per_mol * natoms)*9, dim=0).tolist()
+    
+    jacs_per_mol = [jac[:len(mol_samps), cum_sum:cum_sum + nat, :] for mol_samps, cum_sum, nat in zip(by_molecule, cumulative_sums[:-1], natoms)]
+    jacs_per_mol = [mol_jac[:, mask, :] for mol_jac, mask in zip(jacs_per_mol, mask_per_mol)]
+
+    if torch.any(torch.isnan(jac)):
+        raise ValueError("Force Jacobian contains NaN values")
+    
+
+    true_jacs_per_mol = []
+    for i, samples in enumerate(by_molecule):
+        fixed_atoms = batch.fixed[cumulative_sums[i]:cumulative_sums[i+1]]
+        fixed_cumsum = torch.cumsum(fixed_atoms, dim=0)
+        num_free_atoms = num_free_atoms_per_mol[i]
+        curr = batch['force_jacs'][cum_jac_indexes[i]:cum_jac_indexes[i+1]].reshape(num_free_atoms, 3, natoms[i], 3)
+        curr = curr[:, :, mask_per_mol[i], :]
+        subsampled_curr = curr[(samples[:, 0] - fixed_cumsum[samples[:, 0]]).long(), samples[:, 1]] # Label rows omit fixed atoms.
+        true_jacs_per_mol.append(subsampled_curr)
+    
+    # Sum atom-wise vector norms and average over sampled rows.
+    custom_loss = lambda jac, true_jac: torch.norm(jac - true_jac, p=2, dim=-1).sum(dim=1).mean(dim=0)
+    # The derivative of normalized force is the physical Jacobian divided by its scale.
+    losses = [custom_loss(jac, true_jac / force_scale) for jac, true_jac in zip(jacs_per_mol, true_jacs_per_mol)]
+    valid_losses = [loss * 1e-8 if true_jac.abs().max().item() > 10000 else loss for loss, true_jac in zip(losses, true_jacs_per_mol)]  # Downweight samples with extreme teacher derivatives.
+    
+    loss = sum(valid_losses)
+    
+    num_samples = sum(num_free_atoms_per_mol)
+    num_samples = distutils.all_reduce(num_samples, device=forces.device)
+    # Compensate for DDP gradient averaging before global normalization.
+    loss  = loss * distutils.get_world_size() / num_samples
+    return loss 
+
+
+def get_jacobian_finite_difference(forces, batch, grad_outputs, forward, collater, looped=False, h=0.0001): 
+    # Use forward differences, not central differences.
+    
+    original_pos = batch.pos.clone()
+
+    perturbed_batches = []
+
+    total_num_atoms = batch.pos.shape[0]
+
+    for output in grad_outputs:
+        perturbed_batch_forward = batch.clone()
+        perturbed_batch_forward.pos = original_pos + h * output
+
+        perturbed_batches.append(perturbed_batch_forward)
+
+    if not looped:
+        large_batch = collater(perturbed_batches)
+        perturbed_forces = forward(large_batch)['forces']
+    else:
+        perturbed_forces = []
+        for batch in perturbed_batches:
+            perturbed_forces.append(forward(batch)['forces'])
+        perturbed_forces = torch.cat(perturbed_forces, dim=0)
+    hessian_columns = []
+    for i in range(len(perturbed_batches)):
+        forward_force = perturbed_forces[i * total_num_atoms:(i + 1) * total_num_atoms]
+        hessian_col = (forward_force - forces) / h
+        hessian_columns.append(hessian_col)
+
+    # These are Jacobian columns. Comparison to teacher rows assumes a symmetric teacher Hessian.
+    return torch.stack(hessian_columns, dim=0)
+    
+
+    

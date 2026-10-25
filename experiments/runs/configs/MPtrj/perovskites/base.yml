@@ -1,0 +1,33 @@
+dataset:
+  train:
+    no_shuffle: true
+    format: lmdb
+    src: experiments/resources/data/MPtrj/perovskites/train
+    key_mapping:
+      uncorrected_total_energy: energy
+      force: forces
+    transforms:
+      normalizer:
+        energy:
+          mean: 0
+          rmsd: 1
+        forces:
+          mean: 0
+          rmsd: 1
+  val:
+    src: experiments/resources/data/MPtrj/perovskites/val
+
+
+  test:
+    src: experiments/resources/data/MPtrj/perovskites/test
+evaluation_metrics:
+  metrics:
+    energy:
+    - mae
+    forces:
+    - mae
+    - cosine_similarity
+    - magnitude_error
+    misc:
+    - energy_forces_within_threshold
+  primary_metric: forces_mae

@@ -1,0 +1,35 @@
+dataset:
+  train:
+    no_shuffle: true
+    format: lmdb
+    src: experiments/resources/data/SPICE/monomers/train
+    key_mapping:
+      y: energy
+      force: forces
+    transforms:
+      normalizer:
+        energy:
+          mean: 0
+          rmsd: 1
+        forces:
+          mean: 0
+          rmsd: 1
+      element_references:
+        file: experiments/runs/configs/SPICE/element_references.pt
+  val:
+    src: experiments/resources/data/SPICE/monomers/val
+
+
+  test:
+    src: experiments/resources/data/SPICE/monomers/test
+evaluation_metrics:
+  metrics:
+    energy:
+    - per_atom_mae
+    forces:
+    - mae
+    - cosine_similarity
+    - magnitude_error
+    misc:
+    - energy_forces_within_threshold
+  primary_metric: forces_mae

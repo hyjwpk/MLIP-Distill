@@ -1,0 +1,17 @@
+# Requires full precision (AMP disabled).
+includes:
+- experiments/runs/configs/MPtrj/perovskites/base.yml
+
+model:
+  name: painn
+  hidden_channels: 128
+  num_layers: 4
+  num_rbf: 128
+  cutoff: 14.0
+  max_neighbors: 50
+  scale_file: null
+  regress_forces: true
+  use_pbc: true
+  otf_graph: true
+  num_elements: 100
+
