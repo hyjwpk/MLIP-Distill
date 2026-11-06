@@ -5,6 +5,10 @@
 
 This repository implements a **knowledge distillation** method for machine-learning interatomic potentials. The method trains a student potential by combining reference energy and force supervision with **atomic-energy** alignment and **energy-Hessian** supervision from a teacher. These complementary signals transfer per-atom energy information and the local force response to atomic displacements without requiring matching hidden representations.
 
+<p align="center">
+  <img src="assets/method.png" alt="Joint atomic-energy and energy-Hessian distillation" width="720">
+</p>
+
 ## Setup
 
 The provided environment uses PyTorch with CUDA 11.8 support.
